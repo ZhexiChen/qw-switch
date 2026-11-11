@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QW Switch</title>
+<style>
+:root{color-scheme:light dark;--surface:light-dark(#fff,#161d29);--bg:light-dark(#f3f6fa,#10151e);--ink:light-dark(#192438,#edf2fa);--muted:light-dark(#50617a,#a5b3c9);--line:light-dark(#d4dce8,#364257);--accent:light-dark(#234fba,#afc3ff);--soft:light-dark(#e7efff,#233354);--error:light-dark(#aa2835,#ffa8ac)}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}main{max-width:880px;margin:auto;padding:44px 24px}
+h1,h2,h3,p{margin:0}h1{font-size:36px;letter-spacing:-.04em}h2{font-size:19px}h3{font-size:16px}
+header,.row,.section-heading{display:flex;gap:12px;align-items:center;justify-content:space-between}header p,.muted{color:var(--muted)}
+section,article,dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+section{margin:26px 0;padding:18px 20px}.section-heading{margin:22px 0 12px}article{padding:15px 18px;margin-bottom:10px}
+.badge{display:inline-block;border-radius:20px;padding:3px 10px;background:var(--soft);color:var(--accent);font-size:12px;white-space:nowrap}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.meta{margin-top:6px;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);color:var(--ink);background:var(--surface);border-radius:8px;padding:7px 12px}
+button:disabled{opacity:.65;cursor:default}.primary{color:var(--accent);background:var(--soft);border-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+dialog{color:var(--ink);width:min(520px,calc(100% - 28px));padding:22px}dialog::backdrop{background:#10151e99}
+form{display:grid;gap:13px;margin-top:16px}label{display:grid;gap:4px}input,select{min-width:0;width:100%;padding:8px 10px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:7px}
+.error{color:var(--error)}#status{min-height:24px;margin-top:14px}small{color:var(--muted)}
+@media(max-width:560px){main{padding:24px 14px}article .row{align-items:flex-start;flex-direction:column}header{align-items:flex-start}}
+</style>
+<main>
+  <header><div><h1>QW Switch</h1><p>千问办公 BYOK 模型切换</p></div><span class="badge">本机网关</span></header>
+  <section aria-labelledby="active-title">
+    <div class="row"><h2 id="active-title">当前生效</h2><span id="active-effort" class="badge" hidden></span></div>
+    <p id="active-profile" class="meta">正在读取配置…</p>
+    <p class="meta">通过 QW Switch 接入的请求会使用当前模型配置。</p>
+  </section>
+  <section aria-labelledby="connection-title">
+    <h2 id="connection-title">接入千问办公</h2>
+    <p class="meta">由已开通企业 BYOK 的管理员在模型目录中添加主模型，并填写以下三项。</p>
+    <p class="meta">本机地址可供此电脑上的 API 客户端使用。若千问办公从服务端发起请求，请填写其网络可访问的企业网关地址。</p>
+    <div class="section-heading"><label for="endpoint">完整 Endpoint</label><button id="copy-endpoint" type="button">复制地址</button></div>
+    <input id="endpoint" readonly>
+    <div class="section-heading"><label for="model-id">服务端模型 Key</label><button id="copy-model" type="button">复制模型 ID</button></div>
+    <input id="model-id" readonly>
+    <div class="section-heading"><label for="access-key">QW Switch 接入密钥</label><button id="copy-key" type="button">复制密钥</button></div>
+    <input id="access-key" type="password" readonly>
+  </section>
+  <div class="section-heading"><h2>模型配置</h2><button type="button" id="add" class="primary">添加配置</button></div>
+  <div id="profiles"></div>
+  <p id="status" role="status" aria-live="polite"></p>
+</main>
+<dialog id="editor" aria-labelledby="editor-title">
+  <h2 id="editor-title">模型配置</h2>
+  <form id="profile-form">
+    <label>连接类型<select name="kind"><option value="openai">自定义 · OpenAI 兼容 API</option><option value="opencodego">OpenCode Go 订阅</option><option value="clinepass">Cline Pass 订阅</option></select></label>
+    <label>配置名称<input name="name" required></label>
+    <label id="endpoint-row">API 地址<input name="endpoint" type="url" placeholder="https://api.example.com/v1"></label>
+    <label>模型 ID<input name="model" required></label>
+    <label>思考强度<select name="effort"><option value="">提供商默认</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+    <label>API 密钥<input name="key" type="password" autocomplete="new-password"><small id="key-note"></small></label>
+    <p id="editor-error" class="error" role="alert"></p>
+    <div class="actions"><button type="submit" class="primary">保存配置</button><button type="button" id="cancel">取消</button></div>
+  </form>
+</dialog>
+<script>
+const byId = id => document.getElementById(id);
+const form = byId('profile-form');
+const fields = form.elements;
+const editor = byId('editor');
+const labels = {openai:'OpenAI 兼容 API', opencodego:'OpenCode Go 订阅', clinepass:'Cline Pass 订阅'};
+const models = {opencodego:'deepseek-v4.1-flash', clinepass:'cline-pass/deepseek-v4.1-flash'};
+const credentials = {saved:'已保存密钥', missing:'待配置密钥'};
+let editing = null;
+let busy = false;
+
+async function api(path, data) {
+  const response = await fetch('/qw-switch/' + path, data ? {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  } : {});
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error?.message || '请求失败');
+  return value;
+}
+function notice(message, error = false) {
+  byId('status').textContent = message;
+  byId('status').classList.toggle('error', error);
+}
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+function button(text, click, className) {
+  const node = element('button', text, className);
+  node.type = 'button';
+  node.onclick = click;
+  return node;
+}
+function render(state) {
+  const active = state.profiles.find(profile => profile.id === state.active);
+  byId('active-profile').textContent = active ? active.name + ' · ' + active.model : '在下方编辑一个配置，填入密钥后启用。';
+  byId('active-effort').hidden = !active;
+  byId('active-effort').textContent = active?.effort || '提供商默认';
+  byId('profiles').replaceChildren(...state.profiles.map(profile => {
+    const selected = profile.id === state.active;
+    const card = element('article');
+    const row = element('div', '', 'row');
+    const summary = element('div');
+    summary.append(element('h3', profile.name), element('p', profile.model, 'meta'),
+      element('p', labels[profile.kind] + ' · ' + credentials[profile.credential], 'meta'));
+    const actions = element('div', '', 'actions');
+    const activate = button(selected ? '使用中' : '启用', () => run('activate', profile, '已切换到 ' + profile.name), 'primary');
+    activate.disabled = selected || profile.credential === 'missing';
+    const test = button('测试', () => run('test', profile, profile.name + ' 连接成功'));
+    test.disabled = profile.credential === 'missing';
+    actions.append(activate, test, button('编辑', () => edit(profile)));
+    if (!selected) actions.append(button('删除', () => {
+      if (confirm('删除配置「' + profile.name + '」？')) run('delete', profile, '配置已删除');
+    }));
+    row.append(summary, actions);
+    card.append(row);
+    return card;
+  }));
+}
+async function run(action, profile, success) {
+  if (busy) return;
+  busy = true;
+  notice(action === 'test' ? '正在测试 ' + profile.name + '…' : '正在保存…');
+  try {
+    const state = await api(action, {id:profile.id});
+    if (action !== 'test') render(state);
+    notice(success);
+  } catch (error) { notice(error.message, true); }
+  finally { busy = false; }
+}
+function updateType(fillDefaults) {
+  const kind = fields.kind.value;
+  byId('endpoint-row').hidden = kind !== 'openai';
+  fields.endpoint.required = kind === 'openai';
+  fields.endpoint.disabled = kind !== 'openai';
+  byId('key-note').textContent = editing ? '留空保留此地址已保存的密钥。' : '填写提供商或订阅的 API 密钥。';
+  if (fillDefaults && models[kind]) {
+    if (!editing) fields.name.value = labels[kind];
+    fields.model.value = models[kind];
+    fields.effort.value = 'max';
+  }
+}
+function edit(profile = null) {
+  if (busy) return;
+  editing = profile?.id ?? null;
+  form.reset();
+  for (const field of ['kind', 'name', 'endpoint', 'model', 'effort']) {
+    if (profile) fields[field].value = profile[field];
+  }
+  updateType(false);
+  byId('editor-error').textContent = '';
+  editor.showModal();
+}
+fields.kind.onchange = () => updateType(true);
+byId('add').onclick = () => edit();
+byId('cancel').onclick = () => editor.close();
+form.onsubmit = async event => {
+  event.preventDefault();
+  if (busy) return;
+  busy = true;
+  try {
+    const state = await api('save', {id:editing, ...Object.fromEntries(new FormData(form))});
+    fields.key.value = '';
+    editor.close();
+    render(state);
+    notice('配置已保存');
+  } catch (error) { byId('editor-error').textContent = error.message; }
+  finally { busy = false; }
+};
+async function copy(field, label) {
+  try {
+    const value = byId(field).value;
+    if (!value) return;
+    if (window.webkit?.messageHandlers?.copy) window.webkit.messageHandlers.copy.postMessage(value);
+    else await navigator.clipboard.writeText(value);
+    notice(label + '已复制');
+  } catch (error) { notice(error.message, true); }
+}
+byId('copy-endpoint').onclick = () => copy('endpoint', '地址');
+byId('copy-model').onclick = () => copy('model-id', '模型 ID');
+byId('copy-key').onclick = () => copy('access-key', '密钥');
+api('state').then(state => {
+  render(state);
+  byId('endpoint').value = state.connection.endpoint;
+  byId('model-id').value = state.connection.model;
+  byId('access-key').value = state.connection.key;
+}).catch(error => notice(error.message, true));
+</script>
+</html>
