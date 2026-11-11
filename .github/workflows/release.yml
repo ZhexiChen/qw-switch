@@ -1,0 +1,43 @@
+name: Build and publish macOS prerelease
+
+on:
+  push:
+    tags:
+      - 'v0.2.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build Apple Silicon DMG
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-aarch64-apple-darwin-pgo%2Blto-full.tar.zst' \
+            --output "$RUNNER_TEMP/python.tar.zst"
+          python3 build-macos.py \
+            --python-archive "$RUNNER_TEMP/python.tar.zst" \
+            --output QW-Switch-0.2.0-macOS-arm64.dmg
+          hdiutil verify QW-Switch-0.2.0-macOS-arm64.dmg > "$RUNNER_TEMP/dmg-verify.log" 2>&1 || {
+            tail -c 4000 "$RUNNER_TEMP/dmg-verify.log"
+            exit 1
+          }
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            'QW-Switch-0.2.0-macOS-arm64.dmg#QW Switch 0.2.0 · Apple Silicon DMG' \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title 'QW Switch 0.2.0（预发行版）' --notes-file - <<'NOTES'
+          QW Switch 是独立的 macOS 模型切换工具。通过千问办公官方企业 BYOK 接入后，可在 QW Switch 内切换 OpenCode Go、Cline Pass 和自定义 OpenAI 兼容接口。千问办公使用原版客户端。
+
+          下载下方 Apple Silicon DMG，将 QW Switch 拖入「应用程序」。安装包自带 Python 运行时，最低系统要求为 macOS 13。此版本未经 Apple 公证，首次启动若遇到开发者验证提示，可参见 [Apple 的首次打开说明](https://support.apple.com/zh-cn/102445)。
+
+          在 QW Switch 中配置并启用提供商后，企业管理员可按 [接入说明](https://github.com/ZhexiChen/qw-switch#接入千问办公) 配置千问办公 BYOK。网关验证覆盖预检、流式工具调用和提供商切换，真实企业账号接入仍待验收。
+          NOTES
